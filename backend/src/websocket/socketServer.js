@@ -1,18 +1,20 @@
 const { Server } = require('socket.io');
 const { env } = require('../config/env');
 
-const setupSocketServer = (fastify) => {
-  if (fastify.io) {
-    return fastify.io;
-  }
+const parseOrigins = () =>
+  env.corsOrigin === '*'
+    ? true
+    : env.corsOrigin
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
 
-  const origins = env.corsOrigin === '*' ? true : env.corsOrigin.split(',');
-
-  const io = new Server(fastify.server, {
+const initSocket = (server) => {
+  const io = new Server(server, {
     cors: {
-      origin: origins,
+      origin: parseOrigins(),
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-      credentials: true,
+      credentials: false,
     },
   });
 
@@ -37,16 +39,9 @@ const setupSocketServer = (fastify) => {
     });
   });
 
-  fastify.decorate('io', io);
-
-  fastify.addHook('onClose', async (instance, done) => {
-    await instance.io.close();
-    done();
-  });
-
   return io;
 };
 
 module.exports = {
-  setupSocketServer,
+  initSocket,
 };

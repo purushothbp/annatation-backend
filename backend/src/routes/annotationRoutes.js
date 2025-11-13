@@ -1,13 +1,17 @@
+const express = require('express');
 const {
   createAnnotation,
   updateAnnotation,
   deleteAnnotation,
 } = require('../controllers/annotationController');
+const { authenticate } = require('../middleware/authenticate');
 
-module.exports = async function annotationRoutes(fastify) {
-  fastify.addHook('preValidation', fastify.authenticate);
+const router = express.Router();
 
-  fastify.post('/', createAnnotation);
-  fastify.patch('/:id', updateAnnotation);
-  fastify.delete('/:id', deleteAnnotation);
-};
+router.use(authenticate);
+
+router.post('/', createAnnotation);
+router.patch('/:id', updateAnnotation);
+router.delete('/:id', deleteAnnotation);
+
+module.exports = router;

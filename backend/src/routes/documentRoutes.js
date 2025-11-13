@@ -1,3 +1,5 @@
+const express = require('express');
+const multer = require('multer');
 const {
   listDocuments,
   uploadDocument,
@@ -6,14 +8,25 @@ const {
   getDocumentTextMetadata,
   getAnnotations,
 } = require('../controllers/documentController');
+const { authenticate } = require('../middleware/authenticate');
 
-module.exports = async function documentRoutes(fastify) {
-  fastify.addHook('preValidation', fastify.authenticate);
+const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024,
+    fieldSize: 1024 * 1024,
+    files: 1,
+  },
+});
 
-  fastify.get('/', listDocuments);
-  fastify.post('/', uploadDocument);
-  fastify.get('/:id', getDocument);
-  fastify.get('/:id/text', getDocumentText);
-  fastify.get('/:id/text-metadata', getDocumentTextMetadata);
-  fastify.get('/:id/annotations', getAnnotations);
-};
+router.use(authenticate);
+
+router.get('/', listDocuments);
+router.post('/', upload.single('file'), uploadDocument);
+router.get('/:id', getDocument);
+router.get('/:id/text', getDocumentText);
+router.get('/:id/text-metadata', getDocumentTextMetadata);
+router.get('/:id/annotations', getAnnotations);
+
+module.exports = router;

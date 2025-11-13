@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.local
+dist
+tmp
+*.log
+.DS_Store
+backend/storage/documents/*
+backend/storage/text/*
+!backend/storage/documents/.gitkeep
+!backend/storage/text/.gitkeep

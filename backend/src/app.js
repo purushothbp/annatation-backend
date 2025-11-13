@@ -1,60 +1,59 @@
-const fastify = require('fastify');
 const path = require('path');
+const express = require('express');
+const cors = require('cors');
+require('express-async-errors');
 const { env } = require('./config/env');
-const authPlugin = require('./plugins/auth');
+const authRoutes = require('./routes/authRoutes');
+const documentRoutes = require('./routes/documentRoutes');
+const annotationRoutes = require('./routes/annotationRoutes');
 
-const buildApp = () => {
-  const app = fastify({
-    logger: env.nodeEnv !== 'test',
-  });
+const app = express();
 
-  const corsOrigins =
-    env.corsOrigin === '*'
-      ? true
-      : env.corsOrigin
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
+const corsOrigins =
+  env.corsOrigin === '*'
+    ? true
+    : env.corsOrigin
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
 
-  app.register(require('@fastify/cors'), {
+app.use(
+  cors({
     origin: corsOrigins,
     credentials: false,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'Accept'],
     exposedHeaders: ['Content-Disposition'],
     maxAge: 86400,
-  });
+  })
+);
 
-  app.register(require('@fastify/multipart'), {
-    limits: {
-      fieldNameSize: 100,
-      fieldSize: 1024 * 1024,
-      fileSize: 100 * 1024 * 1024,
-      files: 1,
-    },
-  });
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-  app.register(require('@fastify/jwt'), {
-    secret: env.jwtSecret,
-  });
+app.use('/files', express.static(path.join(__dirname, '../storage/documents')));
 
-  app.register(authPlugin);
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
 
-  app.register(require('@fastify/static'), {
-    root: path.join(__dirname, '../storage/documents'),
-    prefix: '/files/',
-    decorateReply: false,
-  });
+app.use('/api/auth', authRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/annotations', annotationRoutes);
 
-  app.get('/health', async () => ({ status: 'ok', uptime: process.uptime() }));
+// 404 handler
+app.use((req, res, next) => {
+  res.status(404).json({ message: 'Not found' });
+});
 
-  app.register(require('./routes/authRoutes'), { prefix: '/api/auth' });
-  app.register(require('./routes/documentRoutes'), { prefix: '/api/documents' });
-  app.register(require('./routes/annotationRoutes'), { prefix: '/api/annotations' });
+// Error handler
+app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || 'Internal Server Error';
+  res.status(status).json({ message });
+});
 
-  return app;
-};
-
-module.exports = {
-  buildApp,
-};
+module.exports = app;

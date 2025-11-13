@@ -1,7 +1,11 @@
+const express = require('express');
 const { register, login, me } = require('../controllers/authController');
+const { authenticate } = require('../middleware/authenticate');
 
-module.exports = async function authRoutes(fastify) {
-  fastify.post('/register', register);
-  fastify.post('/login', login);
-  fastify.get('/me', { preValidation: [fastify.authenticate] }, me);
-};
+const router = express.Router();
+
+router.post('/register', register);
+router.post('/login', login);
+router.get('/me', authenticate, me);
+
+module.exports = router;

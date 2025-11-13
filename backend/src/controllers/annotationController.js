@@ -8,8 +8,8 @@ const canEditAnnotation = (annotation, user) => {
   return user.role === 'owner';
 };
 
-const createAnnotation = async (request, reply) => {
-  const { documentId, selector, quoteSelector, body, orphaned } = request.body;
+const createAnnotation = async (req, res) => {
+  const { documentId, selector, quoteSelector, body, orphaned } = req.body;
 
   if (
     !documentId ||
@@ -18,28 +18,28 @@ const createAnnotation = async (request, reply) => {
     !quoteSelector?.exact ||
     !body
   ) {
-    return reply.code(400).send({ message: 'documentId, selector, quoteSelector.exact and body are required' });
+    return res.status(400).json({ message: 'documentId, selector, quoteSelector.exact and body are required' });
   }
 
   if (selector.end < selector.start) {
-    return reply.code(400).send({ message: 'selector.end must be greater than selector.start' });
+    return res.status(400).json({ message: 'selector.end must be greater than selector.start' });
   }
 
   const document = await Document.findById(documentId);
   if (!document) {
-    return reply.code(404).send({ message: 'Document not found' });
+    return res.status(404).json({ message: 'Document not found' });
   }
 
   const rangeHash = Annotation.buildRangeHash({
     documentId,
     selector,
-    userId: request.user.sub,
+    userId: req.user.sub,
   });
 
   try {
     const annotation = await Annotation.create({
       documentId,
-      userId: request.user.sub,
+      userId: req.user.sub,
       selector,
       quoteSelector,
       body,
@@ -47,33 +47,33 @@ const createAnnotation = async (request, reply) => {
       rangeHash,
     });
 
-    request.server.io?.to(`doc:${documentId}`).emit('annotation.created', annotation);
+    req.app.get('io')?.to(`doc:${documentId}`).emit('annotation.created', annotation);
 
-    reply.code(201).send({ annotation });
+    res.status(201).json({ annotation });
   } catch (error) {
     if (error.code === 11000) {
-      return reply.code(409).send({ message: 'Duplicate annotation for this range' });
+      return res.status(409).json({ message: 'Duplicate annotation for this range' });
     }
     throw error;
   }
 };
 
-const updateAnnotation = async (request, reply) => {
-  const { id } = request.params;
-  const updates = request.body;
+const updateAnnotation = async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
 
   const annotation = await Annotation.findById(id);
   if (!annotation) {
-    return reply.code(404).send({ message: 'Annotation not found' });
+    return res.status(404).json({ message: 'Annotation not found' });
   }
 
-  if (!canEditAnnotation(annotation, request.user)) {
-    return reply.code(403).send({ message: 'Forbidden' });
+  if (!canEditAnnotation(annotation, req.user)) {
+    return res.status(403).json({ message: 'Forbidden' });
   }
 
   if (updates.selector) {
     if (updates.selector.end < updates.selector.start) {
-      return reply.code(400).send({ message: 'selector.end must be greater than selector.start' });
+      return res.status(400).json({ message: 'selector.end must be greater than selector.start' });
     }
     annotation.selector = updates.selector;
     annotation.rangeHash = Annotation.buildRangeHash({
@@ -97,27 +97,27 @@ const updateAnnotation = async (request, reply) => {
 
   await annotation.save();
 
-  request.server.io?.to(`doc:${annotation.documentId}`).emit('annotation.updated', annotation);
+  req.app.get('io')?.to(`doc:${annotation.documentId}`).emit('annotation.updated', annotation);
 
-  reply.send({ annotation });
+  res.json({ annotation });
 };
 
-const deleteAnnotation = async (request, reply) => {
-  const { id } = request.params;
+const deleteAnnotation = async (req, res) => {
+  const { id } = req.params;
   const annotation = await Annotation.findById(id);
   if (!annotation) {
-    return reply.code(404).send({ message: 'Annotation not found' });
+    return res.status(404).json({ message: 'Annotation not found' });
   }
 
-  if (!canEditAnnotation(annotation, request.user)) {
-    return reply.code(403).send({ message: 'Forbidden' });
+  if (!canEditAnnotation(annotation, req.user)) {
+    return res.status(403).json({ message: 'Forbidden' });
   }
 
   await Annotation.deleteOne({ _id: id });
 
-  request.server.io?.to(`doc:${annotation.documentId}`).emit('annotation.deleted', { id });
+  req.app.get('io')?.to(`doc:${annotation.documentId}`).emit('annotation.deleted', { id });
 
-  reply.code(204).send();
+  res.status(204).send();
 };
 
 module.exports = {

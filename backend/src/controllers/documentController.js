@@ -11,9 +11,9 @@ const ensureDirs = async () => {
   await fsp.mkdir(env.textDir, { recursive: true });
 };
 
-const listDocuments = async (request, reply) => {
-  const page = Number(request.query.page || 1);
-  const limit = Number(request.query.limit || 10);
+const listDocuments = async (req, res) => {
+  const page = Number(req.query.page || 1);
+  const limit = Number(req.query.limit || 10);
   const skip = (page - 1) * limit;
 
   const [items, total] = await Promise.all([
@@ -25,7 +25,7 @@ const listDocuments = async (request, reply) => {
     Document.countDocuments({}),
   ]);
 
-  reply.send({
+  res.json({
     data: items,
     pagination: {
       page,
@@ -36,36 +36,22 @@ const listDocuments = async (request, reply) => {
   });
 };
 
-const uploadDocument = async (request, reply) => {
+const uploadDocument = async (req, res) => {
   await ensureDirs();
 
-  const parts = request.parts();
-  const fields = {};
-  let filePart;
-
-  for await (const part of parts) {
-    if (part.type === 'file') {
-      filePart = part;
-    } else {
-      fields[part.fieldname] = part.value;
-    }
-  }
+  const filePart = req.file;
+  const fields = req.body || {};
 
   if (!filePart) {
-    return reply.code(400).send({ message: 'PDF file is required' });
+    return res.status(400).json({ message: 'PDF file is required' });
   }
 
   if (filePart.mimetype !== 'application/pdf') {
-    return reply.code(400).send({ message: 'Only PDF files are supported' });
+    return res.status(400).json({ message: 'Only PDF files are supported' });
   }
 
-  const title = fields.title || filePart.filename || 'Untitled Document';
-
-  const tempBufferChunks = [];
-  for await (const chunk of filePart.file) {
-    tempBufferChunks.push(chunk);
-  }
-  const pdfBuffer = Buffer.concat(tempBufferChunks);
+  const title = fields.title || filePart.originalname || 'Untitled Document';
+  const pdfBuffer = filePart.buffer;
 
   const documentId = new mongoose.Types.ObjectId();
   const pdfFileName = `${documentId}.pdf`;
@@ -75,13 +61,11 @@ const uploadDocument = async (request, reply) => {
   const document = await Document.create({
     _id: documentId,
     title,
-    ownerId: request.user.sub,
+    ownerId: req.user.sub,
     storageLocation: pdfFileName,
     mimeType: filePart.mimetype,
     extractionStatus: 'processing',
   });
-
-  const log = request.log;
 
   setImmediate(async () => {
     try {
@@ -109,87 +93,87 @@ const uploadDocument = async (request, reply) => {
         },
         { new: true }
       );
-      log.error({ err: error }, 'Text extraction failed');
+      console.error('Text extraction failed', error);
     }
   });
 
-  reply.code(202).send({ document });
+  res.status(202).json({ document });
 };
 
-const getDocument = async (request, reply) => {
-  const { id } = request.params;
+const getDocument = async (req, res) => {
+  const { id } = req.params;
   const document = await Document.findById(id);
 
   if (!document) {
-    return reply.code(404).send({ message: 'Document not found' });
+    return res.status(404).json({ message: 'Document not found' });
   }
 
-  reply.send({ document });
+  res.json({ document });
 };
 
-const getDocumentText = async (request, reply) => {
-  const { id } = request.params;
+const getDocumentText = async (req, res) => {
+  const { id } = req.params;
   const document = await Document.findById(id);
 
   if (!document) {
-    return reply.code(404).send({ message: 'Document not found' });
+    return res.status(404).json({ message: 'Document not found' });
   }
 
   if (!document.textLocation) {
-    return reply.code(202).send({ message: 'Text extraction pending', status: document.extractionStatus });
+    return res.status(202).json({ message: 'Text extraction pending', status: document.extractionStatus });
   }
 
   const textPath = path.join(env.textDir, document.textLocation);
   try {
     const textContent = await fsp.readFile(textPath, 'utf8');
-    reply
-      .type('text/plain; charset=utf-8')
-      .header('Cache-Control', 'no-store')
+    res
+      .set('Content-Type', 'text/plain; charset=utf-8')
+      .set('Cache-Control', 'no-store')
       .send(textContent);
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return reply.code(500).send({ message: 'Extracted text missing' });
+      return res.status(500).json({ message: 'Extracted text missing' });
     }
-    return reply.code(500).send({ message: 'Extracted text missing' });
+    return res.status(500).json({ message: 'Extracted text missing' });
   }
 };
 
-const getDocumentTextMetadata = async (request, reply) => {
-  const { id } = request.params;
+const getDocumentTextMetadata = async (req, res) => {
+  const { id } = req.params;
   const document = await Document.findById(id);
 
   if (!document) {
-    return reply.code(404).send({ message: 'Document not found' });
+    return res.status(404).json({ message: 'Document not found' });
   }
 
   if (!document.textMetadataLocation) {
-    return reply.code(202).send({ message: 'Metadata not ready', status: document.extractionStatus });
+    return res.status(202).json({ message: 'Metadata not ready', status: document.extractionStatus });
   }
 
   const metaPath = path.join(env.textDir, document.textMetadataLocation);
   try {
     const contents = await fsp.readFile(metaPath, 'utf8');
-    reply.send({ metadata: JSON.parse(contents) });
+    res.json({ metadata: JSON.parse(contents) });
   } catch (error) {
-    request.log.error({ err: error }, 'Failed to read metadata');
-    reply.code(500).send({ message: 'Failed to read metadata' });
+    console.error('Failed to read metadata', error);
+    res.status(500).json({ message: 'Failed to read metadata' });
   }
 };
 
-const getAnnotations = async (request, reply) => {
-  const { id } = request.params;
-  const limit = Number(request.query.limit || 50);
-  const { cursor } = request.query;
+const getAnnotations = async (req, res) => {
+  const { id } = req.params;
+  const limit = Number(req.query.limit || 50);
+  const { cursor } = req.query;
   const document = await Document.findById(id);
 
   if (!document) {
-    return reply.code(404).send({ message: 'Document not found' });
+    return res.status(404).json({ message: 'Document not found' });
   }
 
   const query = { documentId: id };
   if (cursor) {
     if (!mongoose.Types.ObjectId.isValid(cursor)) {
-      return reply.code(400).send({ message: 'Invalid cursor' });
+      return res.status(400).json({ message: 'Invalid cursor' });
     }
     query._id = { $gt: new mongoose.Types.ObjectId(cursor) };
   }
@@ -203,7 +187,7 @@ const getAnnotations = async (request, reply) => {
   const data = hasMore ? annotations.slice(0, limit) : annotations;
   const nextCursor = hasMore ? data[data.length - 1]._id : null;
 
-  reply.send({
+  res.json({
     data,
     pagination: {
       cursor: nextCursor,

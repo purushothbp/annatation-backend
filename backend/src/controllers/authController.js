@@ -1,4 +1,6 @@
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { env } = require('../config/env');
 
 const sanitizeUser = (user) => ({
   id: user._id,
@@ -9,47 +11,57 @@ const sanitizeUser = (user) => ({
   updatedAt: user.updatedAt,
 });
 
-const register = async (request, reply) => {
-  const { name, email, password, role } = request.body;
+const createToken = (user) =>
+  jwt.sign(
+    {
+      sub: user.id,
+      role: user.role,
+    },
+    env.jwtSecret,
+    { expiresIn: '7d' }
+  );
+
+const register = async (req, res) => {
+  const { name, email, password, role } = req.body;
 
   if (!name || !email || !password) {
-    return reply.code(400).send({ message: 'name, email and password are required' });
+    return res.status(400).json({ message: 'name, email and password are required' });
   }
 
   const existing = await User.findOne({ email });
   if (existing) {
-    return reply.code(409).send({ message: 'Email already registered' });
+    return res.status(409).json({ message: 'Email already registered' });
   }
 
   const passwordHash = await User.hashPassword(password);
   const user = await User.create({ name, email, passwordHash, role });
-  const token = await reply.jwtSign({ sub: user.id, role: user.role });
+  const token = createToken(user);
 
-  reply.code(201).send({ user: sanitizeUser(user), token });
+  res.status(201).json({ user: sanitizeUser(user), token });
 };
 
-const login = async (request, reply) => {
-  const { email, password } = request.body;
+const login = async (req, res) => {
+  const { email, password } = req.body;
 
   if (!email || !password) {
-    return reply.code(400).send({ message: 'email and password are required' });
+    return res.status(400).json({ message: 'email and password are required' });
   }
 
   const user = await User.findOne({ email });
   if (!user || !(await user.comparePassword(password))) {
-    return reply.code(401).send({ message: 'Invalid credentials' });
+    return res.status(401).json({ message: 'Invalid credentials' });
   }
 
-  const token = await reply.jwtSign({ sub: user.id, role: user.role });
-  reply.send({ user: sanitizeUser(user), token });
+  const token = createToken(user);
+  res.json({ user: sanitizeUser(user), token });
 };
 
-const me = async (request, reply) => {
-  const user = await User.findById(request.user.sub);
+const me = async (req, res) => {
+  const user = await User.findById(req.user.sub);
   if (!user) {
-    return reply.code(404).send({ message: 'User not found' });
+    return res.status(404).json({ message: 'User not found' });
   }
-  reply.send({ user: sanitizeUser(user) });
+  res.json({ user: sanitizeUser(user) });
 };
 
 module.exports = {
